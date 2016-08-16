@@ -225,6 +225,10 @@
 			height: 40%;
 			top: 30%;
 		}
+		.button-forbidden {
+			pointer-events: none;
+			background: #222;
+		}
 	</style>
 	<title>Document</title>
 </head>
@@ -239,18 +243,6 @@
 		</div>
 		<div id="fition_chapter_title"></div>
 		<div id="fition_container" class="m-content">
-			<h4>XMLHttpRequest</h4>
-			<p>
-				XMLHttpRequest 是一个 JavaScript 对象，它最初由微软设计,随后被 Mozilla、Apple 和 Google采纳. 如今,该对象已经被 W3C组织标准化. 通过它,你可以很容易的取回一个URL上的资源数据. 尽管名字里有XML, 但 XMLHttpRequest 可以取回所有类型的数据资源，并不局限于XML。 而且除了HTTP ,它还支持file 和 ftp 协议.
-				XMLHttpRequest 是一个 JavaScript 对象，它最初由微软设计,随后被 Mozilla、Apple 和 Google采纳. 如今,该对象已经被 W3C组织标准化. 通过它,你可以很容易的取回一个URL上的资源数据. 尽管名字里有XML, 但 XMLHttpRequest 可以取回所有类型的数据资源，并不局限于XML。 而且除了HTTP ,它还支持file 和 ftp 协议.
-				XMLHttpRequest 是一个 JavaScript 对象，它最初由微软设计,随后被 Mozilla、Apple 和 Google采纳. 如今,该对象已经被 W3C组织标准化. 通过它,你可以很容易的取回一个URL上的资源数据. 尽管名字里有XML, 但 XMLHttpRequest 可以取回所有类型的数据资源，并不局限于XML。 而且除了HTTP ,它还支持file 和 ftp 协议.
-			</p>
-			<p>
-				XMLHttpRequest 是一个 JavaScript 对象，它最初由微软设计,随后被 Mozilla、Apple 和 Google采纳. 如今,该对象已经被 W3C组织标准化. 通过它,你可以很容易的取回一个URL上的资源数据. 尽管名字里有XML, 但 XMLHttpRequest 可以取回所有类型的数据资源，并不局限于XML。 而且除了HTTP ,它还支持file 和 ftp 协议.
-			</p>
-			<p>
-				XMLHttpRequest 是一个 JavaScript 对象，它最初由微软设计,随后被 Mozilla、Apple 和 Google采纳. 如今,该对象已经被 W3C组织标准化. 通过它,你可以很容易的取回一个URL上的资源数据. 尽管名字里有XML, 但 XMLHttpRequest 可以取回所有类型的数据资源，并不局限于XML。 而且除了HTTP ,它还支持file 和 ftp 协议.
-			</p>
 		</div>
 		<div class="m-button-bar">
 			<ul class="u-tab">
@@ -287,7 +279,7 @@
 		<div id="bottom_bg" class="bottom-bg" style="display:none"></div>
 		<div id="bottom_nav" class="bottom-nav" style="display:none">
 			<div class="bottom-option">
-				<div>
+				<div id="bottom_option_list">
 					<div class="icon-list"></div>
 					<div>目录</div>
 				</div>
@@ -317,6 +309,7 @@
 	<script src="js/jquery.base64.js"></script>
 	<script src="js/jquery.jsonp.js"></script>
 	<script>
+	"use strict";
 		(function(){
 			let Util = (function(){//本地缓存
 				let prefix = 'html5_reader_';
@@ -326,7 +319,20 @@
 				let StorageSetter = function(key,val){
 					return localStorage.setItem(prefix + key,val);
 				}
+				let getJsonp = function(url,callback){
+					return $.jsonp({
+						url: url,
+						cache: true,
+						callback: 'duokan_fiction_chapter',//服务器返回的
+						success: function(result){
+							let data = $.base64.decode(result);
+							let json = decodeURIComponent(escape(data));
+							callback(json);
+						}
+					});
+				}
 				return {
+					getJsonp: getJsonp,
 					StorageGetter:StorageGetter,
 					StorageSetter:StorageSetter
 				}
@@ -339,36 +345,151 @@
 				day_button: $('#bottom_option_day'),
 				nav_pannel: $('#font_container,#font_container_bg'),
 				font_button: $('#bottom_option_font'),
+				list_button: $('#bottom_option_list'),
 				icon_font: $('#icon-font')
 			}
 			const WIN = $(window);
 			const DOC = $(document);
 			const BODY = $('body');
-			let RootContainer = $('#fition_container>p');//文本
+			let Container = $('#fition_container');
 			let initFontSize = (parseInt(Util.StorageGetter('fontSize')) || 14);//字体大小
 			let initBgColor = Util.StorageGetter('bgColor') || '#e9dfc7';//背景颜色
+			let readerModel,readerUI;
 			if(initBgColor === '#000'){
 				DOM.day_button.show();
 				DOM.night_button.hide();
 			}
-			RootContainer.css('font-size',initFontSize);
+			Container.css('font-size',initFontSize);
 			BODY.css('background',initBgColor);
 
 			function main(){
 				//整个项目的入口函数
+				readerModel = ReaderModel();
+				readerUI = ReaderBaseFrame(Container);
+				readerModel.init(function(data){
+					readerUI(data);
+				});
 				EventHanlder();
 			}
 
 			function ReaderModel(){
 				//实现和阅读器相关的数据交互的方法
+				let chapterId;
+				let chapterTotal;
+				let init = function(UIcallback){
+					getFictionInfo().then(function(d){
+						return getChapterContent();
+					}).then(function(data){
+						UIcallback && UIcallback(data);
+					});
+				}
+
+
+				let getFictionInfo = function(){
+					return new Promise(function(resolve,reject){
+						$.get('data/chapter.json',function(data){
+							if(data.result === 0){
+								chapterId = Util.StorageGetter('chapterId') || data.chapters[1].chapter_id;
+								chapterTotal = data.chapters.length;
+								Util.StorageSetter('chapterMax',chapterTotal);
+								resolve();
+							}else{
+								reject();
+							}	
+						},'json');
+					});
+				}
+
+				let getChapterContent = function(){
+					return new Promise(function(resolve,reject){
+						$.get('data/data' + chapterId + '.json',function(data){
+							if(data.result === 0){
+								let url = data.jsonp;
+								Util.getJsonp(url,function(data){
+									resolve(data);
+								});
+							}else{
+								reject();
+							}
+							//当ID=0||id=length，禁用按钮
+						},'json');
+					});
+				}
+
+				let prevChapter = function(UIcallback){
+					chapterId = parseInt(chapterId,10);
+					if(chapterId === 0){
+						return;
+					}
+					chapterId -= 1;
+					getChapterContent().then(function(data){
+						UIcallback && UIcallback(data);
+					});
+					Util.StorageSetter('chapterId',chapterId);
+				}
+				let nextChapter = function(UIcallback){
+					chapterId = parseInt(chapterId,10);
+					if(chapterId === chapterTotal){
+						return;
+					}
+					chapterId += 1;
+					getChapterContent().then(function(data){
+						UIcallback && UIcallback(data);
+					});
+					Util.StorageSetter('chapterId',chapterId);
+				}
+				return {
+					init: init,
+					prevChapter: prevChapter,
+					nextChapter: nextChapter
+				}
 			}
 
-			function ReaderBaseFrame(){
+			function ReaderBaseFrame(container){
 				//渲染基本的UI结构
+				function parseChapterData(jsonData){
+					let jsonObj = JSON.parse(jsonData);
+					let chapter = '<h4>' + jsonObj.t + '</h4>';
+					for(let i of jsonObj.p){
+						chapter += '<p>' + i + '</p>';
+					}
+					return chapter;
+				}
+				function pageTurnForbidden(){
+					let chapterId = parseInt(Util.StorageGetter('chapterId'));
+					let chapterMax = parseInt(Util.StorageGetter('chapterMax'));
+					if(chapterId === 1){
+						$('#prev_button').addClass('button-forbidden');
+					}else{
+						$('#prev_button').removeClass('button-forbidden');
+					}
+					if(chapterId === chapterMax){
+						$('#next_button').addClass('button-forbidden');
+					}else{
+						$('#next_button').removeClass('button-forbidden');
+					}
+				}
+				return function(data){
+					container.html(parseChapterData(data));
+					pageTurnForbidden();
+					window.scrollTo(0,0);//滚动条置顶
+					
+				}
 			}
 
 			function EventHanlder(){
 				//交互的事件绑定
+				$('#prev_button').click(function(){//上翻
+					readerModel.prevChapter(function(data){
+						readerUI(data);
+					});
+				});
+				$('#next_button').click(function(){//下翻
+					readerModel.nextChapter(function(data){
+						readerUI(data);
+					});
+				});
+
 				$('#action_mid').click(function(){//操作面板
 					if(DOM.top_nav.css('display') === 'none'){
 						DOM.bottom_nav.show();
@@ -391,27 +512,29 @@
 					}
 				});
 
+				DOM.list_button.click(function(){
+					//目录
+				});
+
 				$('#large_font').click(function(){//字体放大
 					if(initFontSize > 20){
 						return;
 					}
 					initFontSize += 1;
-					RootContainer.css('font-size',initFontSize);
+					Container.css('font-size',initFontSize);
 					Util.StorageSetter('fontSize',initFontSize);
-					console.log(Util);
 				});
 				$('#small_font').click(function(){//字体缩小
 					if(initFontSize < 13){
 						return;
 					}
 					initFontSize -= 1;
-					RootContainer.css('font-size',initFontSize);
+					Container.css('font-size',initFontSize);
 					Util.StorageSetter('fontSize',initFontSize);
 				});
 
 				$('.bg-container').click(function(){//颜色
-					let that = this;
-					initBgColor = $(that).css('background');
+					initBgColor = $(this).css('background');
 					BODY.css('background',initBgColor);
 					Util.StorageSetter('bgColor',initBgColor);
 					DOM.day_button.hide();
@@ -427,8 +550,8 @@
 				DOM.day_button.click(function(){//日间模式
 					DOM.day_button.hide();
 					DOM.night_button.show();
-					BODY.css('background','#fff');
-					Util.StorageSetter('bgColor','#fff');
+					BODY.css('background','#e9dfc7');
+					Util.StorageSetter('bgColor','#e9dfc7');
 				});
 
 				WIN.scroll(function(){//滚动页面关闭字体面板
